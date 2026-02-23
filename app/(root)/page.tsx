@@ -23,20 +23,20 @@ export default function Home() {
   const syncUser = useMutation(api.users.syncUser);
   const updatePresence = useMutation(api.users.updatePresence);
 
-  const [selectedConvId, setSelectedConvId] =
-    useState<Id<"conversations"> | null>(null);
-  const [selectedUser, setSelectedUser] =
-    useState<ConvexUser | null>(null);
+  const [selectedConvId, setSelectedConvId] = useState<Id<"conversations"> | null>(null);
+  const [selectedUser, setSelectedUser] = useState<ConvexUser | null>(null);
+  // Group state
+  const [isGroup, setIsGroup] = useState(false);
+  const [groupName, setGroupName] = useState<string | undefined>(undefined);
+  const [groupMembers, setGroupMembers] = useState<ConvexUser[]>([]);
 
   const currentUser = useQuery(api.users.getUserByClerkId, {
     clerkId: user?.id ?? "",
   });
 
-  const getOrCreate = useMutation(
-    api.conversations.getOrCreateConversation
-  );
+  const getOrCreate = useMutation(api.conversations.getOrCreateConversation);
 
-  /* -------------------- Sync User -------------------- */
+  /* ── Sync User ── */
   useEffect(() => {
     if (isLoaded && user) {
       syncUser({
@@ -48,42 +48,40 @@ export default function Home() {
     }
   }, [isLoaded, user, syncUser]);
 
-  /* -------------------- Presence -------------------- */
+  /* ── Presence ── */
   useEffect(() => {
     if (!user) return;
-
     updatePresence({ clerkId: user.id, isOnline: true });
 
-    const handleUnload = () => {
-      updatePresence({ clerkId: user.id, isOnline: false });
-    };
-
-    const handleVisibility = () => {
-      updatePresence({
-        clerkId: user.id,
-        isOnline: !document.hidden,
-      });
-    };
+    const handleUnload = () => updatePresence({ clerkId: user.id, isOnline: false });
+    const handleVisibility = () =>
+      updatePresence({ clerkId: user.id, isOnline: !document.hidden });
 
     window.addEventListener("beforeunload", handleUnload);
     document.addEventListener("visibilitychange", handleVisibility);
-
     return () => {
       window.removeEventListener("beforeunload", handleUnload);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
   }, [user, updatePresence]);
 
-  /* -------------------- Select Conversation -------------------- */
+  /* ── Select Conversation (DM or Group) ── */
   const handleSelectConversation = async (
     convId: Id<"conversations"> | null,
-    otherUser: ConvexUser
+    otherUser: ConvexUser | null,
+    isGroupConv?: boolean,
+    gName?: string,
+    gMembers?: ConvexUser[]
   ) => {
+    setIsGroup(!!isGroupConv);
+    setGroupName(gName);
+    setGroupMembers(gMembers ?? []);
     setSelectedUser(otherUser);
 
     if (convId) {
       setSelectedConvId(convId);
-    } else if (currentUser) {
+    } else if (currentUser && otherUser) {
+      // DM — get or create
       const id = await getOrCreate({
         currentUserId: currentUser._id,
         otherUserId: otherUser._id,
@@ -92,15 +90,13 @@ export default function Home() {
     }
   };
 
-  /* -------------------- Skeleton Loading State -------------------- */
+  /* ── Skeleton Loading ── */
   if (!isLoaded || currentUser === undefined) {
     return (
       <main className="h-screen flex bg-[#F5F4F0] overflow-hidden">
-        {/* Sidebar Skeleton */}
         <div className="w-full md:w-[300px] md:min-w-[300px] h-full border-r bg-white p-4 space-y-4">
           <Skeleton className="h-8 w-32" />
           <Skeleton className="h-10 w-full rounded-xl" />
-
           {[...Array(6)].map((_, i) => (
             <div key={i} className="flex items-center gap-3">
               <Skeleton className="h-10 w-10 rounded-full" />
@@ -111,8 +107,6 @@ export default function Home() {
             </div>
           ))}
         </div>
-
-        {/* Chat Area Skeleton */}
         <div className="hidden md:flex flex-1 h-full bg-white p-6 flex-col">
           <Skeleton className="h-8 w-40 mb-6" />
           <div className="flex-1 space-y-4">
@@ -126,18 +120,16 @@ export default function Home() {
     );
   }
 
-  /* -------------------- Main App -------------------- */
+  /* ── Main App ── */
   return (
     <main className="h-screen flex bg-[#F5F4F0] overflow-hidden">
 
       {/* Sidebar */}
-      <div
-        className={`
-          ${selectedConvId ? "hidden md:flex" : "flex"}
-          w-full md:w-[300px] md:min-w-[300px]
-          h-full flex-col
-        `}
-      >
+      <div className={`
+        ${selectedConvId ? "hidden md:flex" : "flex"}
+        w-full md:w-[300px] md:min-w-[300px]
+        h-full flex-col
+      `}>
         <Sidebar
           onSelectConversation={handleSelectConversation}
           selectedConversationId={selectedConvId}
@@ -145,13 +137,11 @@ export default function Home() {
       </div>
 
       {/* Chat Area */}
-      <div
-        className={`
-          ${selectedConvId ? "flex" : "hidden md:flex"}
-          flex-1 w-full h-full overflow-hidden
-        `}
-      >
-        {selectedConvId && selectedUser ? (
+      <div className={`
+        ${selectedConvId ? "flex" : "hidden md:flex"}
+        flex-1 w-full h-full overflow-hidden
+      `}>
+        {selectedConvId ? (
           <ChatArea
             conversationId={selectedConvId}
             otherUser={selectedUser}
@@ -159,17 +149,19 @@ export default function Home() {
             onBack={() => {
               setSelectedConvId(null);
               setSelectedUser(null);
+              setIsGroup(false);
+              setGroupName(undefined);
+              setGroupMembers([]);
             }}
+            isGroup={isGroup}
+            groupName={groupName}
+            groupMembers={groupMembers}
           />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center bg-white">
             <div className="text-5xl mb-3">💬</div>
-            <p className="text-[#6B6B85] font-semibold">
-              Select a conversation
-            </p>
-            <p className="text-[#ABABC0] text-sm mt-1">
-              Choose from your conversations on the left
-            </p>
+            <p className="text-[#6B6B85] font-semibold">Select a conversation</p>
+            <p className="text-[#ABABC0] text-sm mt-1">Choose from your conversations on the left</p>
           </div>
         )}
       </div>

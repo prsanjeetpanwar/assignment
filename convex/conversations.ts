@@ -10,15 +10,38 @@ export const getOrCreateConversation = mutation({
     const existing = await ctx.db.query("conversations").collect();
     const found = existing.find(
       (c) =>
+        !c.isGroup &&
         c.participants.includes(args.currentUserId) &&
-        c.participants.includes(args.otherUserId)
+        c.participants.includes(args.otherUserId) &&
+        c.participants.length === 2
     );
     if (found) return found._id;
     return await ctx.db.insert("conversations", {
       participants: [args.currentUserId, args.otherUserId],
       lastMessage: undefined,
       lastMessageTime: undefined,
+      isGroup: false,
     });
+  },
+});
+
+export const createGroupConversation = mutation({
+  args: {
+    creatorId: v.id("users"),
+    memberIds: v.array(v.id("users")),
+    groupName: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const participants = [args.creatorId, ...args.memberIds];
+    const convId = await ctx.db.insert("conversations", {
+      participants,
+      lastMessage: undefined,
+      lastMessageTime: undefined,
+      isGroup: true,
+      groupName: args.groupName,
+      groupCreatedBy: args.creatorId,
+    });
+    return convId;
   },
 });
 
@@ -30,19 +53,34 @@ export const getUserConversations = query({
 
     return await Promise.all(
       mine.map(async (conv) => {
-        const otherId = conv.participants.find((p) => p !== args.userId)!;
-        const otherUser = await ctx.db.get(otherId);
         const unread = await ctx.db
           .query("unreadCounts")
           .withIndex("by_user_conversation", (q) =>
             q.eq("userId", args.userId).eq("conversationId", conv._id)
           )
           .first();
-        return {
-          ...conv,
-          otherUser,
-          unreadCount: unread?.count ?? 0,
-        };
+
+        if (conv.isGroup) {
+          // For groups, fetch all member details
+          const members = await Promise.all(
+            conv.participants.map((id) => ctx.db.get(id))
+          );
+          return {
+            ...conv,
+            otherUser: null,
+            members: members.filter(Boolean),
+            unreadCount: unread?.count ?? 0,
+          };
+        } else {
+          const otherId = conv.participants.find((p) => p !== args.userId)!;
+          const otherUser = await ctx.db.get(otherId);
+          return {
+            ...conv,
+            otherUser,
+            members: null,
+            unreadCount: unread?.count ?? 0,
+          };
+        }
       })
     );
   },
@@ -67,6 +105,13 @@ export const getTypingUsers = query({
         )
       )
       .collect();
-    return typing;
+
+    // Enrich with user names for group chats
+    return await Promise.all(
+      typing.map(async (t) => {
+        const user = await ctx.db.get(t.userId);
+        return { ...t, userName: user?.name ?? "Someone" };
+      })
+    );
   },
 });
