@@ -14,3 +14,5 @@ export default clerkMiddleware(async (auth, request) => {
 export const config = {
   matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
 };
+
+export const runtime = "nodejs";
