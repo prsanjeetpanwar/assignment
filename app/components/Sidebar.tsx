@@ -114,7 +114,7 @@ export default function Sidebar({ onSelectConversation, selectedConversationId }
                 <TooltipContent>New Group</TooltipContent>
               </Tooltip>
               <ThemeToggle />
-              <UserButton afterSignOutUrl="/sign-in" />
+              <UserButton />
             </div>
           </div>
 
